@@ -1,12 +1,12 @@
 
-# Bayesian Optimization of Fast Charging (3-Step Protocol)
+# Bayesian Optimization of Fast Charging
 
 ############################### Description ###############################
 
-Uses a DFN (P2D) cell model with lithium plating to optimize a 3-step fast charging protocol via Bayesian Optimization (Ax Platform). The optimization seeks to maximize charge stored in 30 minutes while minimizing aging due to lithium plating.  
+Uses a DFN (P2D) cell model with lithium plating to optimize a multi-step CC-CV fast charging protocol via Bayesian Optimization (Ax Platform). The optimization seeks to maximize charge stored in 30 minutes while minimizing aging due to lithium plating.  
 
 Outputs:
-- Best performing 3-step protocol (C1,C2,C3)
+- Best performing multi-step protocol (C1,C2,C3,...)
 - Optimization history and performance plots
 
 ############################### Dependencies ###############################
