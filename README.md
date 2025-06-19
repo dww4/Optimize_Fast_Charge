@@ -9,6 +9,11 @@ Outputs:
 - Best performing multi-step protocol (C1,C2,C3,...)
 - Optimization history and performance plots
 
+############################### Versions ###############################
+
+- 3step: Optimizes a 3-step CC-CV fast charge protocol (no thermals/temperature variation)
+- 3step_thermals: Optimizes a 3-step CC-CV fast charge protocol with a lumped thermal model (time-varying temperature)
+
 ############################### Dependencies ###############################
 
 0. PyBaMM Installation (pip install pybamm)  
