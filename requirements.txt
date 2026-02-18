@@ -1,0 +1,30 @@
+# Bayesian Optimization for Fast-Charging Protocols
+# Multi-Objective Optimization with Coupled Degradation Modes
+
+# Battery simulation
+pybamm>=25.1.1
+
+# Optimization framework
+ax-platform>=1.0.0
+botorch>=0.14.0
+gpytorch>=1.14
+torch>=2.7.0
+
+# Numerical computing
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Visualization
+matplotlib>=3.7.0
+plotly>=5.18.0
+pandas>=2.0.0
+
+# Utilities
+tqdm>=4.65.0
+jupyter>=1.0.0
+
+# Fix for typing_extensions compatibility with PyTorch 2.7.0
+typing-extensions>=4.9.0
+
+# Optional but recommended
+ipywidgets>=8.0.0  # Interactive notebook widgets
