@@ -185,7 +185,13 @@ class PyBaMMSimulator:
                 warnings.filterwarnings("ignore", message=".*corrector convergence.*")
                 warnings.filterwarnings("ignore", message=".*linesearch algorithm.*")
 
-                solution = sim.solve(solver=pybamm.CasadiSolver(mode="safe", dt_max=1))
+                solution = sim.solve(solver=pybamm.CasadiSolver(
+                    mode="fast with events",
+                    dt_max=1,
+                    rtol=1e-3,
+                    atol=1e-6,
+                    extra_options_setup={"max_num_steps": 20000},
+                ))
 
             # Store for debugging
             self.last_solution = solution
