@@ -1,0 +1,30 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Environment
+.env
+venv/
+env/
+
+# Ax Platform experiment storage (optional - uncomment if needed)
+# *.db
+# *.json
+
+# Results (optional - you may want to track these)
+# multi_objective/results/
