@@ -1,0 +1,57 @@
+[
+  {
+    "name": "CCCV_2.0C",
+    "type": "CCCV",
+    "description": "Constant current at 2.0C until 4.2V, then constant voltage",
+    "Q30": 0.07165721849415221,
+    "plating_loss": 0.475798707241264,
+    "sei_growth": 63.13511004327612,
+    "sei_li_loss": 0.002212961024383774,
+    "total_lli": 0.01996572410743866,
+    "success": true
+  },
+  {
+    "name": "LinearTaper_3.0C-1.0C",
+    "type": "LinearTaper",
+    "description": "Linear current taper from 3.0C to 1.0C over 6 steps",
+    "Q30": 0.053484719004043856,
+    "plating_loss": 0.41161497678490033,
+    "sei_growth": 54.229774227569365,
+    "sei_li_loss": 0.0019008183662700933,
+    "total_lli": 0.0172587902419569,
+    "success": true
+  },
+  {
+    "name": "LinearTaper_3.0C-0.5C",
+    "type": "LinearTaper",
+    "description": "Linear current taper from 3.0C to 0.5C over 6 steps",
+    "Q30": 0.06860718595869915,
+    "plating_loss": 0.48072203891545345,
+    "sei_growth": 62.26209721421071,
+    "sei_li_loss": 0.0021823608818769425,
+    "total_lli": 0.02011882085073876,
+    "success": true
+  },
+  {
+    "name": "BO_3step_aggressive",
+    "type": "BO_Optimal",
+    "description": "Best 3-step protocol from single-objective BO (\u03b2=0.008): Charge-Rest-Charge",
+    "Q30": 0.08992021910868452,
+    "plating_loss": 0.32223992398439755,
+    "sei_growth": 58.22097913642907,
+    "sei_li_loss": 0.002040714865976542,
+    "total_lli": 0.014063969530886438,
+    "success": true
+  },
+  {
+    "name": "BO_3step_conservative",
+    "type": "BO_Optimal",
+    "description": "Best 3-step protocol from single-objective BO (\u03b2=0.015): Low degradation focus",
+    "Q30": 0.03020833333333333,
+    "plating_loss": 0.001405671466661826,
+    "sei_growth": 59.766679174574875,
+    "sei_li_loss": 0.0020948934987129147,
+    "total_lli": 0.0021473412085121846,
+    "success": true
+  }
+]

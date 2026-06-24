@@ -1,0 +1,32 @@
+{
+  "experiment_name": "fast_charge_multi_obj",
+  "objectives": {
+    "charge_throughput": "maximize",
+    "total_lli": "minimize",
+    "sei_growth": "minimize"
+  },
+  "parameters": {
+    "C1": [
+      0.0,
+      3.0
+    ],
+    "C2": [
+      0.0,
+      3.0
+    ],
+    "C3": [
+      0.0,
+      3.0
+    ]
+  },
+  "protocol_structure": "3-step with 10-minute intervals",
+  "soc_range": "10-90%",
+  "degradation_modes": [
+    "plating",
+    "SEI"
+  ],
+  "num_iterations": 50,
+  "trials_per_iteration": 3,
+  "total_trials": 150,
+  "pareto_frontier_size": 64
+}
