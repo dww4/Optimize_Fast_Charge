@@ -37,11 +37,7 @@ Uses a physics-based DFN/P2D cell model with degradation mechanisms to optimize 
 1. Run Simulation:
 	a. Open: `BO-P2D-FastCharge-3step.ipynb` in JupyterLab or Jupyter Notebook
 
-	b. Execute all cells:
-		i. Defines model and objective
-		ii. Runs Bayesian Optimization
-		iii. Outputs:
-			- Optimization results
+	b. Execute all cells: i) Defines model and objective -> ii) Runs Bayesian Optimization -> iii) Outputs Optimization Results
 
 ############################### Help ###############################
 
