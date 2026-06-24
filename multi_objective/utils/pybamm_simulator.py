@@ -65,7 +65,7 @@ _SOLVER_LEVELS: List[Dict] = [
 # clock limit per level so the fallback always fires within reasonable time.
 # The abandoned C++ thread continues in the background until IDAS eventually
 # gives up, which is unavoidable in CPython without process isolation.
-# Chosen so that Level0+1+2 total ≤ typical trial timeout (120 s in optimizer).
+# Level0+1+2+3 total = 25+50+60+60 = 195s; optimizer eval timeout is 210s.
 _LEVEL_WALL_TIMEOUTS = [25, 50, 60]  # seconds per level
 
 
@@ -818,3 +818,27 @@ def run_P2D_single_objective(
     plating_loss = max(metrics["plating_loss"], 1e-6)
 
     return {"objective": Q30 - beta * np.log(plating_loss)}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Subprocess worker (multiprocessing-safe simulation entry point)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _subprocess_worker(c_rates, step_durations, simulator_kwargs, queue):
+    """
+    Top-level worker for multiprocessing.Process-based simulation runs.
+
+    Must be module-level so that spawn-context subprocesses can import it by
+    name without executing __main__. Builds a fresh PyBaMMSimulator inside the
+    child process so the parent never needs to pickle the simulator object.
+    """
+    try:
+        sim = PyBaMMSimulator(**simulator_kwargs)
+        result = sim.run_and_extract(
+            c_rates=c_rates,
+            step_durations=step_durations,
+            verbose=False,
+        )
+        queue.put(result)
+    except Exception as exc:
+        queue.put({"success": False, "error": str(exc)})
