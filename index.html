@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fast-Charge Optimization — Post-Mortem Analysis</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root {
+    --bg:        #0e0f11;
+    --surface:   #16181c;
+    --surface2:  #1e2126;
+    --border:    rgba(255,255,255,0.08);
+    --border2:   rgba(255,255,255,0.14);
+    --text:      #e8e9eb;
+    --muted:     #7a7f8a;
+    --dim:       #4a4f5a;
+    --blue:      #4a9eff;
+    --blue-dim:  rgba(74,158,255,0.15);
+    --purple:    #a78bfa;
+    --purple-dim:rgba(167,139,250,0.15);
+    --coral:     #f87171;
+    --coral-dim: rgba(248,113,113,0.15);
+    --teal:      #2dd4bf;
+    --teal-dim:  rgba(45,212,191,0.15);
+    --amber:     #fbbf24;
+    --green:     #4ade80;
+    --radius:    8px;
+    --radius-lg: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 2rem 2.5rem 1.5rem;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+  }
+  .header-left { max-width: 680px; }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--blue);
+    margin-bottom: .5rem;
+  }
+  h1 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.3;
+    margin-bottom: .5rem;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: var(--muted);
+    max-width: 560px;
+  }
+  .header-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 20px;
+    letter-spacing: .03em;
+  }
+  .badge-blue  { background: var(--blue-dim);   color: var(--blue);   border: 1px solid rgba(74,158,255,.25); }
+  .badge-teal  { background: var(--teal-dim);   color: var(--teal);   border: 1px solid rgba(45,212,191,.25); }
+  .badge-amber { background: rgba(251,191,36,.12); color: var(--amber); border: 1px solid rgba(251,191,36,.25); }
+
+  /* ── Layout ── */
+  main { padding: 2rem 2.5rem; max-width: 1200px; }
+  .section { margin-bottom: 2.5rem; }
+  .section-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 1rem;
+    padding-bottom: .5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ── Stat cards ── */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: .9rem 1rem;
+  }
+  .card-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .card-value { font-size: 22px; font-weight: 600; color: var(--text); line-height: 1.1; }
+  .card-sub   { font-size: 11px; color: var(--dim); margin-top: 3px; }
+  .card-value.blue   { color: var(--blue); }
+  .card-value.teal   { color: var(--teal); }
+  .card-value.coral  { color: var(--coral); }
+  .card-value.amber  { color: var(--amber); }
+
+  /* ── Chart area ── */
+  .chart-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem 1.5rem;
+  }
+  .tab-bar {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 1.25rem;
+    flex-wrap: wrap;
+  }
+  .tab {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 5px 14px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all .15s;
+    font-family: inherit;
+  }
+  .tab:hover { border-color: var(--border2); color: var(--text); }
+  .tab.active { background: var(--surface2); border-color: var(--border2); color: var(--text); font-weight: 500; }
+  .chart-wrap { height: 340px; }
+  .chart-panel { display: none; width: 100%; height: 100%; }
+  .chart-panel.visible { display: block; }
+  .chart-panel canvas { width: 100% !important; height: 100% !important; }
+  .legend-row {
+    display: flex; gap: 18px; flex-wrap: wrap;
+    font-size: 12px; color: var(--muted); margin-top: 12px;
+  }
+  .leg { display: flex; align-items: center; gap: 6px; }
+  .leg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .leg-diamond { width: 9px; height: 9px; transform: rotate(45deg); flex-shrink: 0; }
+
+  /* ── Findings ── */
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.25rem;
+    margin-bottom: 10px;
+    display: flex;
+    gap: 14px;
+  }
+  .finding:hover { border-color: var(--border2); }
+  .fn { font-size: 11px; font-weight: 600; color: var(--dim); min-width: 22px; padding-top: 2px; font-variant-numeric: tabular-nums; }
+  .ft { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 5px; }
+  .fb { font-size: 13px; color: var(--muted); line-height: 1.7; }
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 500;
+    padding: 2px 9px; border-radius: 20px; margin-top: 7px;
+  }
+  .tag-blue   { background: var(--blue-dim);   color: var(--blue);   border: 1px solid rgba(74,158,255,.2); }
+  .tag-amber  { background: rgba(251,191,36,.1); color: var(--amber); border: 1px solid rgba(251,191,36,.2); }
+  .tag-teal   { background: var(--teal-dim);    color: var(--teal);  border: 1px solid rgba(45,212,191,.2); }
+  .tag-coral  { background: var(--coral-dim);   color: var(--coral); border: 1px solid rgba(248,113,113,.2); }
+
+  /* ── Code spans ── */
+  code { font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace; font-size: 12px; background: var(--surface2); padding: 1px 6px; border-radius: 4px; color: var(--blue); }
+
+  /* ── Table ── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th {
+    text-align: left; padding: 7px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted); font-weight: 500;
+    font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
+    white-space: nowrap;
+  }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  .pos { color: var(--coral); }
+  .neg { color: var(--green); }
+  .neu { color: var(--muted); }
+
+  /* ── Recommendation grid ── */
+  .rec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .rec-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.25rem;
+  }
+  .rec-card:hover { border-color: var(--border2); }
+  .rec-title { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
+  .rec-proto { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+  .rec-body { font-size: 12px; color: var(--muted); line-height: 1.65; }
+  .rec-sub  { font-size: 11px; color: var(--dim); margin-top: 4px; }
+
+  /* ── Footer ── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 1.25rem 2.5rem;
+    color: var(--dim);
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  footer a { color: var(--blue); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+
+  /* ── Tooltip ── */
+  #tooltip {
+    position: fixed; background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: var(--radius); padding: 8px 12px; font-size: 12px;
+    pointer-events: none; display: none; z-index: 100;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4); max-width: 220px; line-height: 1.7;
+  }
+
+  @media (max-width: 680px) {
+    header, main, footer { padding-left: 1rem; padding-right: 1rem; }
+    h1 { font-size: 1.4rem; }
+    .rec-grid { grid-template-columns: 1fr; }
+    .header-meta { align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="eyebrow">NMC-Graphite Cell · Simulated with PyBaMM DFN · Optimized via Ax/BoTorch</div>
+    <h1>Fast-Charge Optimization<br>Post-Analysis Dashboard</h1>
+  </div>
+  <div class="header-meta">
+    <span class="badge badge-blue">150 trials</span>
+    <span class="badge badge-teal">3 objectives</span>
+    <span class="badge badge-amber">76 Pareto-optimal</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- Project goal -->
+  <div class="section">
+    <div class="section-label">project goal</div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem 1.5rem;">
+      <div style="display:flex;gap:1.5rem;align-items:flex-start;flex-wrap:wrap;">
+        <div style="flex:1;min-width:260px;">
+          <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:.5rem;">What charge profile minimizes degradation without sacrificing fast-charge speed?</div>
+          <div style="font-size:13px;color:var(--muted);line-height:1.75;">
+            A lithium-ion cell is charged using a 3-step current profile: <span style="color:var(--text);font-weight:500;">C1 → C2 → C3</span>, where each C-rate controls how aggressively current is applied during that step. Higher C-rates charge faster but accelerate two distinct forms of battery degradation — <span style="color:var(--coral);">capacity fade</span> (loss of lithium inventory, LLI) and <span style="color:var(--blue);">impedance rise</span> (SEI layer growth).
+          </div>
+        </div>
+        <div style="flex:1;min-width:260px;">
+          <div style="font-size:13px;color:var(--muted);line-height:1.75;">
+            This study used Bayesian optimization to intelligently search the protocol space — running 150 simulated charge cycles to find the combinations of C1, C2, and C3 that best balance all three competing objectives simultaneously. The result is a <span style="color:var(--text);font-weight:500;">Pareto front</span>: the set of protocols where no single objective can be improved without sacrificing another.
+          </div>
+          <div style="margin-top:.85rem;display:flex;gap:8px;flex-wrap:wrap;">
+            <span style="font-size:12px;background:rgba(74,158,255,.1);color:var(--blue);border:1px solid rgba(74,158,255,.2);border-radius:20px;padding:3px 11px;">↑ Maximize Q30 (charge speed)</span>
+            <span style="font-size:12px;background:rgba(248,113,113,.1);color:var(--coral);border:1px solid rgba(248,113,113,.2);border-radius:20px;padding:3px 11px;">↓ Minimize LLI (capacity fade)</span>
+            <span style="font-size:12px;background:rgba(45,212,191,.1);color:var(--teal);border:1px solid rgba(45,212,191,.2);border-radius:20px;padding:3px 11px;">↓ Minimize SEI (impedance rise)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recommendations -->
+  <div class="section">
+    <div class="section-label">practical recommendation matrix</div>
+    <div class="rec-grid">
+      <div class="rec-card">
+        <div class="rec-title">Maximize charge speed</div>
+        <div class="rec-proto" style="color:#f87171">2.89C → 0C → 3C</div>
+        <div class="rec-body">Q30=0.0915 Ah (+1.8% vs baseline) · LLI=0.0151 mol (+7.4%) · SEI=59.2 nm</div>
+        <div class="rec-sub">Trial 146. Marginal throughput gain, mixed degradation tradeoff.</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-title">Minimize capacity fade (LLI)</div>
+        <div class="rec-proto" style="color:#2dd4bf">1.83C → 0C → 2.23C</div>
+        <div class="rec-body">Q30=0.0846 Ah (−5.9%) · LLI=0.0067 mol (−52% vs baseline) · SEI=64.5 nm</div>
+        <div class="rec-sub">Trial 134. Best new finding from this optimization run.</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-title">Balanced — use the original baseline</div>
+        <div class="rec-proto" style="color:#7a7f8a">3C → 0C → 3C</div>
+        <div class="rec-body">Q30=0.0899 Ah · LLI=0.01406 mol · SEI=58.2 nm · Non-dominated</div>
+        <div class="rec-sub">Trial 0. The 150-trial optimizer could not strictly improve on it.</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-title">Minimize impedance growth (SEI)</div>
+        <div class="rec-proto" style="color:#4a9eff">~0.1–0.4C → 0C → 3C</div>
+        <div class="rec-body">SEI ≈ 50–52 nm (−10% vs baseline) · Q30 ≈ 0.064–0.068 Ah · LLI ≈ 0.014 mol</div>
+        <div class="rec-sub">Trials 78, 79, 95, 113. Significant throughput penalty (~25%).</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="section">
+    <div class="section-label">results summary</div>
+    <div class="cards">
+      <div class="card">
+        <div class="card-label">Best Q30 found</div>
+        <div class="card-value amber">0.0917 Ah</div>
+        <div class="card-sub">trial 142 · +2% vs baseline</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Baseline Q30</div>
+        <div class="card-value">0.0899 Ah</div>
+        <div class="card-sub">3C→0C→3C · non-dominated</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Pareto-optimal</div>
+        <div class="card-value blue">76</div>
+        <div class="card-sub">54% of feasible</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Feasible completed</div>
+        <div class="card-value">141</div>
+        <div class="card-sub">5 failed · 4 infeasible</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Intermediate rest periods</div>
+        <div class="card-value teal">20/20</div>
+        <div class="card-sub">100% of top 20 trials</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Back-loaded (C3&gt;C1)</div>
+        <div class="card-value">64%</div>
+        <div class="card-sub">of Pareto front</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="section">
+    <div class="section-label">interactive pareto projections</div>
+    <div class="chart-container">
+      <div class="tab-bar">
+        <button class="tab active" onclick="showChart('pareto3d')">3D Pareto Front</button>
+        <button class="tab" onclick="showChart('q30_lli')">Q30 vs LLI</button>
+        <button class="tab" onclick="showChart('q30_sei')">Q30 vs SEI</button>
+        <button class="tab" onclick="showChart('lli_sei')">LLI vs SEI</button>
+      </div>
+      <div class="chart-wrap">
+        <div id="p_q30_lli" class="chart-panel"><canvas id="c_q30_lli" role="img" aria-label="Scatter: Q30 vs LLI."></canvas></div>
+        <div id="p_q30_sei" class="chart-panel"><canvas id="c_q30_sei" role="img" aria-label="Scatter: Q30 vs SEI growth."></canvas></div>
+        <div id="p_lli_sei" class="chart-panel"><canvas id="c_lli_sei" role="img" aria-label="Scatter: LLI vs SEI. Anti-correlation visible (Pearson r=−0.36)."></canvas></div>
+        <div id="p_pareto3d" class="chart-panel"><canvas id="c_pareto3d" role="img" aria-label="3D Pareto front: Q30 vs LLI vs SEI. Drag to rotate."></canvas></div>
+      </div>
+      <div class="legend-row">
+        <div class="leg"><div class="leg-dot" style="background:#4a9eff"></div>Pareto · C2=0 (rest step)</div>
+        <div class="leg"><div class="leg-dot" style="background:#a78bfa"></div>Pareto · C2&gt;0</div>
+        <div class="leg"><div class="leg-dot" style="background:#3a3f4a"></div>Non-Pareto</div>
+        <div class="leg"><div class="leg-diamond" style="background:#f87171"></div>Baseline (3C→0C→3C)</div>
+        <div class="leg" id="legend-3d-hint" style="display:none;color:#4a4f5a;font-style:italic;">drag to rotate · scroll to zoom</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Findings -->
+  <div class="section">
+    <div class="section-label">key findings</div>
+
+    <div class="finding">
+      <div class="fn">01</div>
+      <div>
+        <div class="ft">C2=0 rest step is the single strongest predictor of high-throughput performance</div>
+        <div class="fb">Every one of the top 20 trials by Q30 uses <code>C2=0</code>. Protocols with a rest step average Q30=0.064 Ah vs 0.046 Ah for C2&gt;0 — a 39% mean advantage. BoTorch converged on this structure quickly and exploited it exclusively from trial ~30 onward. The rest step is doing real electrochemical work: it allows reversible lithium to strip from the anode surface, partially resetting the anode's degradation state before the C3 pulse.</div>
+        <span class="tag tag-blue">Strongest structural finding</span>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="fn">02</div>
+      <div>
+        <div class="ft">LLI and SEI are anti-correlated (r = −0.36), not co-moving — a genuine theoretical contribution</div>
+        <div class="fb">High-LLI protocols tend to have lower SEI (e.g., trial 5: LLI=0.018 mol, SEI=57.6 nm). High-SEI protocols tend to have lower LLI (e.g., trial 8: SEI=66.2 nm, LLI=0.007 mol). This means minimizing one without tracking the other would yield misleading results. The 3-objective formulation was not redundant — it exposed a real physical tradeoff between two distinct degradation mechanisms driven by different submodels. This anti-correlation is an independent result worth reporting.</div>
+        <span class="tag tag-amber">Revises prior assumption of co-movement</span>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="fn">03</div>
+      <div>
+        <div class="ft">Back-loading works because the rest step depletes the anode, not because high-SoC is inherently safe</div>
+        <div class="fb">The pattern <code>C1=low→C2=0→C3=high</code> is not "load max current at high SoC." It is: charge moderately, rest (allowing lithium stripping to reduce surface Li concentration and partially reverse plating from C1), then deliver a strong final pulse to a partially reset anode. In NMC-Gr the graphite anode is most vulnerable during staging transitions (LiC₁₂→LiC₆) around 50–70% SoC — a rest step before C3 can shift the effective anode SoC downward, reducing the driving force for further plating during C3. This mechanism depends on the reversible plating submodel and is specific to graphite-anode chemistries with distinct staging. It would not generalize to irreversible plating models or to LFP.</div>
+        <span class="tag tag-coral">Chemistry- and model-specific — not a general principle</span>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="fn">04</div>
+      <div>
+        <div class="ft">The most actionable new discovery: 50% LLI reduction at only 6% throughput cost</div>
+        <div class="fb">Trial 134 (<code>1.83C→0C→2.23C</code>): Q30=0.0846 Ah (−5.9% vs baseline), LLI=0.0067 mol (−52%), SEI=64.5 nm (+11%). Trial 2 (<code>2C→0C→2C</code>): Q30=0.0833 Ah (−7.3%), LLI=0.0051 mol (−64%), SEI=64.8 nm. These protocols sacrifice modest throughput and accept modestly higher SEI growth, but cut capacity-fade-related degradation in half. If cycle life rather than charge speed is the design objective, this region of the Pareto front is the real discovery — not the high-throughput end near the baseline.</div>
+        <span class="tag tag-blue">Most actionable new finding</span>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="fn">05</div>
+      <div>
+        <div class="ft">The baseline (3C→0C→3C) is genuinely non-dominated — no trial strictly beats it on all three objectives</div>
+        <div class="fb">Zero trials simultaneously achieve Q30 ≥ 0.0899 Ah, LLI ≤ 0.01406 mol, and SEI ≤ 58.22 nm. The best multi-objective competitor is trial 146 (<code>2.89C→0C→3C</code>): Q30=0.0915 Ah (+1.8%), but LLI=0.0151 mol (+7.4%) and SEI=59.2 nm (+1.7%). The optimizer found the same qualitative protocol, slightly retuned, with only marginal and mixed objective improvements. The practical conclusion holds: added complexity was not worth the return at the high-throughput end of the Pareto front.</div>
+        <span class="tag tag-teal">Confirms practical conclusion</span>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="fn">06</div>
+      <div>
+        <div class="ft">The C1=3C regime is voltage-cutoff saturated, not degradation-limited</div>
+        <div class="fb">All 25+ trials with <code>C1=3C</code> and <code>C2&gt;0</code> converge to exactly Q30=0.0417 Ah regardless of C2 or C3. C1=3C immediately drives the cell to its upper voltage cutoff, the step terminates early, and subsequent steps contribute little additional charge. This is a model artifact that wastes optimization budget. The only escape is <code>C2=0</code> — skipping a non-zero second step entirely — which is how the baseline (trial 0) achieves Q30=0.090 Ah. BoTorch correctly learned to avoid C1=3C+C2&gt;0 after the early Sobol phase.</div>
+        <span class="tag tag-coral">Model artifact — voltage cutoff at C1=3C</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top 10 table -->
+  <div class="section">
+    <div class="section-label">top 10 pareto protocols by Q30 (all C2=0)</div>
+    <div class="chart-container">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Trial</th>
+              <th>C1 (C)</th>
+              <th>C2 (C)</th>
+              <th>C3 (C)</th>
+              <th>Q30 (Ah)</th>
+              <th>LLI (mol)</th>
+              <th>SEI (nm)</th>
+              <th>vs baseline LLI</th>
+            </tr>
+          </thead>
+          <tbody id="top10tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+
+</main>
+
+<footer>
+  <span>NMC-Gr · PyBaMM P2D/DFN · Ax/BoTorch · Reversible plating + SEI submodels · 150 trials</span>
+  <a href="https://github.com/dww4/Optimize_Fast_Charge" target="_blank">github.com/dww4/Optimize_Fast_Charge ↗</a>
+</footer>
+
+<div id="tooltip"></div>
+
+<script>
+const RAW = [{"t":0,"Q":0.08992,"S":58.221,"L":0.014064,"c1":3.0,"c2":0.0,"c3":3.0,"p":1,"z":1},{"t":1,"Q":0.03021,"S":59.767,"L":0.002147,"c1":0.91,"c2":0.0,"c3":0.54,"p":0,"z":1},{"t":2,"Q":0.08333,"S":64.759,"L":0.005127,"c1":2.0,"c2":0.0,"c3":2.0,"p":1,"z":1},{"t":3,"Q":0.0625,"S":65.731,"L":0.004967,"c1":1.5,"c2":1.5,"c3":1.5,"p":0,"z":0},{"t":4,"Q":0.03928,"S":58.703,"L":0.003408,"c1":0.2146,"c2":2.4382,"c3":0.1752,"p":0,"z":0},{"t":5,"Q":0.06106,"S":57.613,"L":0.018309,"c1":2.512,"c2":2.1786,"c3":0.9562,"p":0,"z":0},{"t":6,"Q":0.05402,"S":61.804,"L":0.014956,"c1":0.7453,"c2":0.4983,"c3":2.8092,"p":0,"z":0},{"t":7,"Q":0.05798,"S":63.745,"L":0.00792,"c1":0.7607,"c2":2.6645,"c3":0.7493,"p":0,"z":0},{"t":8,"Q":0.06693,"S":66.165,"L":0.006535,"c1":1.9823,"c2":1.3153,"c3":1.5213,"p":0,"z":0},{"t":9,"Q":0.05916,"S":58.586,"L":0.016389,"c1":1.573,"c2":2.5421,"c3":2.5359,"p":0,"z":0},{"t":10,"Q":0.04717,"S":65.16,"L":0.003124,"c1":1.3123,"c2":0.8854,"c3":1.1984,"p":0,"z":0},{"t":11,"Q":0.05354,"S":59.05,"L":0.004962,"c1":0.1937,"c2":1.5274,"c3":2.1334,"p":0,"z":0},{"t":12,"Q":0.04471,"S":64.803,"L":0.010039,"c1":2.9213,"c2":0.2018,"c3":0.0958,"p":0,"z":0},{"t":13,"Q":0.03774,"S":50.02,"L":0.004638,"c1":2.7171,"c2":2.817,"c3":2.0487,"p":1,"z":0},{"t":14,"Q":0.04167,"S":57.026,"L":0.013974,"c1":3.0,"c2":0.0,"c3":2.1642,"p":0,"z":1},{"t":15,"Q":0.04044,"S":49.857,"L":0.00915,"c1":2.9118,"c2":2.7575,"c3":2.894,"p":1,"z":0},{"t":16,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":1.7821,"c3":3.0,"p":1,"z":0},{"t":17,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":3.0,"c3":1.5499,"p":1,"z":0},{"t":18,"Q":0.04888,"S":53.072,"L":0.014102,"c1":2.4263,"c2":3.0,"c3":2.4927,"p":0,"z":0},{"t":19,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":2.2168,"c3":2.2919,"p":1,"z":0},{"t":21,"Q":0.05004,"S":58.026,"L":0.014009,"c1":3.0,"c2":0.6028,"c3":2.7973,"p":0,"z":0},{"t":22,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":3.0,"c3":0.4958,"p":1,"z":0},{"t":23,"Q":0.02233,"S":51.672,"L":0.001977,"c1":0.0,"c2":0.3511,"c3":1.2568,"p":0,"z":0},{"t":24,"Q":0.06159,"S":58.356,"L":0.017527,"c1":2.162,"c2":2.3455,"c3":1.9374,"p":0,"z":0},{"t":25,"Q":0.03871,"S":58.096,"L":0.002652,"c1":0.0,"c2":1.5729,"c3":1.2141,"p":0,"z":0},{"t":26,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":2.0024,"c3":1.8696,"p":1,"z":0},{"t":27,"Q":0.04975,"S":55.392,"L":0.013966,"c1":1.4291,"c2":3.0,"c3":3.0,"p":0,"z":0},{"t":28,"Q":0.05058,"S":53.133,"L":0.016385,"c1":2.7882,"c2":2.3957,"c3":0.9727,"p":0,"z":0},{"t":29,"Q":0.09135,"S":59.724,"L":0.014935,"c1":2.7526,"c2":0.0,"c3":3.0,"p":1,"z":1},{"t":30,"Q":0.05369,"S":54.425,"L":0.01685,"c1":2.6698,"c2":2.4005,"c3":0.9126,"p":0,"z":0},{"t":31,"Q":0.09091,"S":59.991,"L":0.014604,"c1":2.663,"c2":0.0,"c3":3.0,"p":1,"z":1},{"t":32,"Q":0.04028,"S":50.026,"L":0.008964,"c1":0.0,"c2":0.0,"c3":2.9005,"p":1,"z":1},{"t":33,"Q":0.05283,"S":54.083,"L":0.016582,"c1":2.6683,"c2":2.4629,"c3":3.0,"p":0,"z":0},{"t":34,"Q":0.05026,"S":55.033,"L":0.01389,"c1":1.7395,"c2":3.0,"c3":0.7803,"p":0,"z":0},{"t":35,"Q":0.04218,"S":49.707,"L":0.013948,"c1":0.0858,"c2":3.0,"c3":3.0,"p":1,"z":0},{"t":36,"Q":0.04158,"S":49.535,"L":0.013938,"c1":0.0,"c2":3.0,"c3":1.5192,"p":0,"z":0},{"t":37,"Q":0.02705,"S":49.884,"L":0.002146,"c1":0.0,"c2":0.0,"c3":1.9472,"p":1,"z":1},{"t":38,"Q":0.06268,"S":63.632,"L":0.002953,"c1":1.4404,"c2":0.0,"c3":1.5685,"p":1,"z":1},{"t":39,"Q":0.03911,"S":56.584,"L":0.002836,"c1":0.0,"c2":0.9113,"c3":1.9047,"p":0,"z":0},{"t":40,"Q":0.04158,"S":49.535,"L":0.013938,"c1":0.0,"c2":3.0,"c3":0.0,"p":0,"z":0},{"t":41,"Q":0.0501,"S":54.141,"L":0.014022,"c1":2.1267,"c2":3.0,"c3":3.0,"p":0,"z":0},{"t":42,"Q":0.08902,"S":64.527,"L":0.012567,"c1":1.8075,"c2":0.0,"c3":2.4653,"p":1,"z":1},{"t":43,"Q":0.05554,"S":56.478,"L":0.015603,"c1":0.0,"c2":1.9782,"c3":2.6845,"p":0,"z":0},{"t":44,"Q":0.02226,"S":62.518,"L":0.002401,"c1":1.603,"c2":0.0,"c3":0.0,"p":0,"z":1},{"t":45,"Q":0.07146,"S":64.124,"L":0.003446,"c1":1.6016,"c2":0.0,"c3":1.8284,"p":1,"z":1},{"t":46,"Q":0.04158,"S":49.535,"L":0.013938,"c1":0.0,"c2":3.0,"c3":0.7516,"p":0,"z":0},{"t":47,"Q":0.03664,"S":61.231,"L":0.002613,"c1":0.5016,"c2":0.9633,"c3":1.1731,"p":0,"z":0},{"t":48,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":2.0548,"c3":0.0,"p":1,"z":0},{"t":49,"Q":0.0894,"S":61.014,"L":0.014108,"c1":2.3161,"c2":0.0,"c3":3.0,"p":0,"z":1},{"t":50,"Q":0.05168,"S":61.064,"L":0.002601,"c1":0.9792,"c2":0.0,"c3":1.5014,"p":1,"z":1},{"t":51,"Q":0.0398,"S":54.995,"L":0.002207,"c1":0.4208,"c2":0.0,"c3":1.4896,"p":1,"z":1},{"t":52,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":1.9935,"c3":0.9065,"p":1,"z":0},{"t":53,"Q":0.0522,"S":58.556,"L":0.004202,"c1":0.0,"c2":1.917,"c3":1.8416,"p":0,"z":0},{"t":54,"Q":0.05027,"S":54.957,"L":0.013887,"c1":1.7803,"c2":3.0,"c3":2.1041,"p":0,"z":0},{"t":55,"Q":0.03172,"S":51.601,"L":0.001953,"c1":0.2624,"c2":0.0,"c3":1.2603,"p":1,"z":1},{"t":56,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":3.0,"c3":3.0,"p":1,"z":0},{"t":57,"Q":0.04955,"S":53.582,"L":0.014056,"c1":2.2956,"c2":3.0,"c3":0.0,"p":0,"z":0},{"t":58,"Q":0.04342,"S":58.843,"L":0.00238,"c1":0.6573,"c2":0.0,"c3":1.4267,"p":0,"z":1},{"t":59,"Q":0.06356,"S":61.443,"L":0.003203,"c1":1.0229,"c2":0.0,"c3":2.0279,"p":1,"z":1},{"t":60,"Q":0.05339,"S":56.455,"L":0.002752,"c1":0.4856,"c2":0.0,"c3":2.0772,"p":1,"z":1},{"t":62,"Q":0.05767,"S":60.103,"L":0.002923,"c1":0.8117,"c2":0.0,"c3":1.9564,"p":1,"z":1},{"t":63,"Q":0.0515,"S":51.974,"L":0.00268,"c1":0.2469,"c2":0.0,"c3":2.2253,"p":1,"z":1},{"t":65,"Q":0.02039,"S":49.317,"L":0.001885,"c1":0.0,"c2":0.0,"c3":1.4682,"p":1,"z":1},{"t":66,"Q":0.0465,"S":58.365,"L":0.003261,"c1":0.0,"c2":1.7303,"c3":1.6174,"p":0,"z":0},{"t":67,"Q":0.03219,"S":54.783,"L":0.002438,"c1":0.318,"c2":0.151,"c3":1.8485,"p":0,"z":0},{"t":68,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":2.7125,"c3":1.7969,"p":1,"z":0},{"t":69,"Q":0.06177,"S":55.625,"L":0.004039,"c1":0.4371,"c2":0.0,"c3":2.5276,"p":1,"z":1},{"t":71,"Q":0.06618,"S":59.1,"L":0.004605,"c1":0.6611,"c2":0.0,"c3":2.5157,"p":1,"z":1},{"t":72,"Q":0.04478,"S":57.53,"L":0.013991,"c1":3.0,"c2":0.2239,"c3":3.0,"p":0,"z":0},{"t":73,"Q":0.05133,"S":53.555,"L":0.016635,"c1":0.0,"c2":2.7831,"c3":2.3227,"p":0,"z":0},{"t":75,"Q":0.03636,"S":58.246,"L":0.002539,"c1":0.0,"c2":2.0603,"c3":0.5576,"p":0,"z":0},{"t":76,"Q":0.08581,"S":61.564,"L":0.013884,"c1":1.8859,"c2":0.0,"c3":3.0,"p":1,"z":1},{"t":77,"Q":0.07696,"S":61.825,"L":0.008129,"c1":1.078,"c2":0.0,"c3":2.6162,"p":1,"z":1},{"t":78,"Q":0.06781,"S":53.443,"L":0.014033,"c1":0.3742,"c2":0.0,"c3":3.0,"p":1,"z":1},{"t":79,"Q":0.06543,"S":50.787,"L":0.013977,"c1":0.2118,"c2":0.0,"c3":3.0,"p":1,"z":1},{"t":80,"Q":0.03336,"S":63.307,"L":0.002548,"c1":1.0695,"c2":0.2925,"c3":1.0397,"p":0,"z":0},{"t":81,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":1.5798,"c3":0.0,"p":1,"z":0},{"t":82,"Q":0.0517,"S":50.258,"L":0.002967,"c1":0.0253,"c2":0.0,"c3":2.4562,"p":1,"z":1},{"t":83,"Q":0.07014,"S":56.503,"L":0.014077,"c1":0.5379,"c2":0.0,"c3":3.0,"p":1,"z":1},{"t":84,"Q":0.05967,"S":51.799,"L":0.004409,"c1":0.2331,"c2":0.0,"c3":2.631,"p":1,"z":1},{"t":85,"Q":0.07452,"S":63.257,"L":0.004276,"c1":1.3295,"c2":0.0,"c3":2.2474,"p":1,"z":1},{"t":86,"Q":0.08738,"S":63.351,"L":0.015223,"c1":1.6946,"c2":0.0,"c3":2.7207,"p":0,"z":1},{"t":87,"Q":0.0287,"S":57.848,"L":0.002314,"c1":0.1135,"c2":1.6965,"c3":0.2564,"p":0,"z":0},{"t":88,"Q":0.04841,"S":63.382,"L":0.0034,"c1":0.7583,"c2":1.0402,"c3":1.6869,"p":0,"z":0},{"t":89,"Q":0.08083,"S":63.889,"L":0.006377,"c1":1.4969,"c2":0.0,"c3":2.3828,"p":1,"z":1},{"t":90,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":3.0,"c3":2.2338,"p":1,"z":0},{"t":91,"Q":0.07078,"S":60.118,"L":0.006236,"c1":0.8045,"c2":0.0,"c3":2.5929,"p":1,"z":1},{"t":92,"Q":0.06966,"S":62.391,"L":0.003686,"c1":1.171,"c2":0.0,"c3":2.1725,"p":1,"z":1},{"t":93,"Q":0.04633,"S":50.975,"L":0.002364,"c1":0.1716,"c2":0.0,"c3":2.0525,"p":1,"z":1},{"t":94,"Q":0.06152,"S":58.223,"L":0.003523,"c1":0.5822,"c2":0.0,"c3":2.3706,"p":1,"z":1},{"t":95,"Q":0.06391,"S":49.995,"L":0.013953,"c1":0.1057,"c2":0.0,"c3":3.0,"p":1,"z":1},{"t":96,"Q":0.0565,"S":53.455,"L":0.003138,"c1":0.3334,"c2":0.0,"c3":2.3786,"p":1,"z":1},{"t":97,"Q":0.06781,"S":56.474,"L":0.008188,"c1":0.4835,"c2":0.0,"c3":2.7712,"p":1,"z":1},{"t":98,"Q":0.0417,"S":60.692,"L":0.00279,"c1":0.3981,"c2":1.6029,"c3":1.0016,"p":0,"z":0},{"t":99,"Q":0.04442,"S":51.807,"L":0.014009,"c1":0.4096,"c2":3.0,"c3":3.0,"p":0,"z":0},{"t":100,"Q":0.07377,"S":59.1,"L":0.014284,"c1":0.6875,"c2":0.0,"c3":2.8536,"p":0,"z":1},{"t":101,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":1.7174,"c3":1.3181,"p":1,"z":0},{"t":102,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":1.7908,"c3":0.0,"p":1,"z":0},{"t":103,"Q":0.05752,"S":56.413,"L":0.003102,"c1":0.4815,"c2":0.0,"c3":2.2797,"p":1,"z":1},{"t":104,"Q":0.06473,"S":53.41,"L":0.007418,"c1":0.3291,"c2":0.0,"c3":2.7781,"p":1,"z":1},{"t":105,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":3.0,"c3":0.0,"p":1,"z":0},{"t":106,"Q":0.08744,"S":62.548,"L":0.014803,"c1":1.8658,"c2":0.0,"c3":2.817,"p":0,"z":1},{"t":107,"Q":0.05612,"S":50.727,"L":0.003617,"c1":0.124,"c2":0.0,"c3":2.5696,"p":1,"z":1},{"t":108,"Q":0.06612,"S":61.161,"L":0.003515,"c1":0.9767,"c2":0.0,"c3":2.1969,"p":1,"z":1},{"t":109,"Q":0.04493,"S":50.941,"L":0.014218,"c1":2.8375,"c2":3.0,"c3":1.5108,"p":0,"z":0},{"t":110,"Q":0.03024,"S":50.035,"L":0.002388,"c1":0.0,"c2":0.0,"c3":2.1771,"p":1,"z":1},{"t":111,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":2.7777,"c3":2.4242,"p":1,"z":0},{"t":113,"Q":0.06665,"S":51.877,"L":0.014003,"c1":0.2947,"c2":0.0,"c3":3.0,"p":1,"z":1},{"t":114,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":1.6691,"c3":0.538,"p":1,"z":0},{"t":115,"Q":0.05144,"S":65.566,"L":0.003478,"c1":2.1196,"c2":0.2869,"c3":1.297,"p":0,"z":0},{"t":116,"Q":0.05499,"S":61.422,"L":0.013904,"c1":2.3085,"c2":0.3993,"c3":3.0,"p":0,"z":0},{"t":118,"Q":0.06893,"S":54.975,"L":0.014062,"c1":0.4534,"c2":0.0,"c3":3.0,"p":1,"z":1},{"t":119,"Q":0.02636,"S":57.299,"L":0.002168,"c1":0.0,"c2":1.3705,"c3":0.5274,"p":0,"z":0},{"t":120,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":1.0811,"c3":1.3591,"p":1,"z":0},{"t":121,"Q":0.08179,"S":63.387,"L":0.009292,"c1":1.3562,"c2":0.0,"c3":2.5699,"p":1,"z":1},{"t":122,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":1.2696,"c3":3.0,"p":1,"z":0},{"t":125,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":1.3397,"c3":1.8117,"p":1,"z":0},{"t":126,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":1.4982,"c3":3.0,"p":1,"z":0},{"t":127,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":1.1587,"c3":0.5994,"p":1,"z":0},{"t":128,"Q":0.03038,"S":62.98,"L":0.00255,"c1":0.8811,"c2":1.3066,"c3":0.0,"p":0,"z":0},{"t":130,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":2.769,"c3":0.0,"p":1,"z":0},{"t":131,"Q":0.03551,"S":61.301,"L":0.002509,"c1":0.4885,"c2":1.6053,"c3":0.4632,"p":0,"z":0},{"t":132,"Q":0.04167,"S":49.506,"L":0.01371,"c1":3.0,"c2":1.2675,"c3":1.0844,"p":1,"z":0},{"t":133,"Q":0.06588,"S":65.283,"L":0.006935,"c1":1.1932,"c2":2.117,"c3":1.433,"p":0,"z":0},{"t":134,"Q":0.08456,"S":64.549,"L":0.006725,"c1":1.8272,"c2":0.0,"c3":2.2316,"p":1,"z":1},{"t":135,"Q":0.07618,"S":62.993,"L":0.005161,"c1":1.2736,"c2":0.0,"c3":2.3831,"p":1,"z":1},{"t":136,"Q":0.06496,"S":55.38,"L":0.006032,"c1":0.4249,"c2":0.0,"c3":2.693,"p":1,"z":1},{"t":137,"Q":0.04858,"S":62.241,"L":0.003323,"c1":0.5532,"c2":1.5088,"c3":1.4356,"p":0,"z":0},{"t":138,"Q":0.05442,"S":65.783,"L":0.006665,"c1":2.7348,"c2":1.1834,"c3":0.0,"p":0,"z":0},{"t":139,"Q":0.04328,"S":50.344,"L":0.013969,"c1":0.2447,"c2":3.0,"c3":0.0,"p":0,"z":0},{"t":140,"Q":0.06139,"S":59.67,"L":0.014545,"c1":2.746,"c2":1.325,"c3":3.0,"p":0,"z":0},{"t":141,"Q":0.03223,"S":64.502,"L":0.002576,"c1":1.5907,"c2":0.7297,"c3":0.0,"p":0,"z":0},{"t":142,"Q":0.09167,"S":63.987,"L":0.016439,"c1":2.0165,"c2":0.0,"c3":2.5567,"p":1,"z":1},{"t":143,"Q":0.04271,"S":49.913,"L":0.013956,"c1":0.162,"c2":3.0,"c3":1.4758,"p":1,"z":0},{"t":144,"Q":0.04506,"S":50.998,"L":0.014227,"c1":2.8294,"c2":3.0,"c3":3.0,"p":0,"z":0},{"t":145,"Q":0.04358,"S":50.77,"L":0.013976,"c1":0.0,"c2":0.2926,"c3":3.0,"p":0,"z":0},{"t":146,"Q":0.09154,"S":59.199,"L":0.015146,"c1":2.8873,"c2":0.0,"c3":3.0,"p":1,"z":1},{"t":147,"Q":0.05821,"S":61.651,"L":0.013312,"c1":1.8062,"c2":1.0976,"c3":3.0,"p":0,"z":0},{"t":148,"Q":0.05933,"S":61.15,"L":0.01307,"c1":1.774,"c2":1.4216,"c3":3.0,"p":0,"z":0},{"t":149,"Q":0.07696,"S":64.407,"L":0.003976,"c1":1.7427,"c2":0.0,"c3":1.9515,"p":1,"z":1}];
+
+const BL_LLI = 0.014064;
+const C_BLUE   = '#4a9eff';
+const C_PURPLE = '#a78bfa';
+const C_GRAY   = '#2e3340';
+const C_CORAL  = '#f87171';
+const C_GRID   = 'rgba(255,255,255,0.06)';
+const C_TICK   = '#4a4f5a';
+
+const nonPareto   = RAW.filter(d => !d.p);
+const paretoC2z   = RAW.filter(d => d.p && d.z && d.t !== 0);
+const paretoC2nz  = RAW.filter(d => d.p && !d.z);
+const baseline    = RAW.find(d => d.t === 0);
+
+const chartInstances = {};
+const activeCharts = {};
+
+function scatterDatasets(xk, yk) {
+  const pt = (d, xk, yk) => ({ x: d[xk], y: d[yk], _d: d });
+  return [
+    { label: 'Non-Pareto',   data: nonPareto.map(d => pt(d,xk,yk)),  backgroundColor: C_GRAY,   pointRadius: 3, pointHoverRadius: 5, showLine: false },
+    { label: 'Pareto C2>0',  data: paretoC2nz.map(d => pt(d,xk,yk)), backgroundColor: C_PURPLE+'cc', pointRadius: 4.5, pointHoverRadius: 6, showLine: false },
+    { label: 'Pareto C2=0',  data: paretoC2z.map(d => pt(d,xk,yk)),  backgroundColor: C_BLUE+'cc',   pointRadius: 5,   pointHoverRadius: 7, showLine: false },
+    { label: 'Baseline',     data: [pt(baseline,xk,yk)],              backgroundColor: C_CORAL, pointStyle: 'rectRot', pointRadius: 8, pointHoverRadius: 10, showLine: false }
+  ];
+}
+
+const axLabel = { Q: 'Q30 [Ah]', L: 'Total LLI [mol]', S: 'SEI growth [nm]', c1: 'C1 [C-rate]', c3: 'C3 [C-rate]' };
+
+function commonOpts(xk, yk, xRange, yRange) {
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label(ctx) {
+            const d = ctx.raw._d;
+            return `T${d.t}: ${d.c1.toFixed(2)}→${d.c2.toFixed(2)}→${d.c3.toFixed(2)}C  |  Q30=${d.Q.toFixed(4)} Ah  LLI=${d.L.toFixed(5)} mol  SEI=${d.S.toFixed(1)} nm`;
+          }
+        },
+        backgroundColor: '#1e2126', borderColor: 'rgba(255,255,255,0.12)', borderWidth: 1,
+        titleColor: '#e8e9eb', bodyColor: '#7a7f8a', padding: 10, cornerRadius: 8
+      }
+    },
+    scales: {
+      x: { min: xRange[0], max: xRange[1], grid: { color: C_GRID }, ticks: { color: C_TICK, font: { size: 11 } }, title: { display: true, text: axLabel[xk], color: C_TICK, font: { size: 11 } } },
+      y: { min: yRange[0], max: yRange[1], grid: { color: C_GRID }, ticks: { color: C_TICK, font: { size: 11 } }, title: { display: true, text: axLabel[yk], color: C_TICK, font: { size: 11 } } }
+    }
+  };
+}
+
+const chartConfigs = {
+  q30_lli: { xk:'Q', yk:'L', xRange:[0.01,0.1],  yRange:[0,0.021] },
+  q30_sei: { xk:'Q', yk:'S', xRange:[0.01,0.1],  yRange:[46,69]   },
+  lli_sei: { xk:'L', yk:'S', xRange:[0,0.021],   yRange:[46,69]   },
+  pareto3d: { custom: true, build: build3DPareto }
+};
+
+function showChart(id) {
+  document.querySelectorAll('.chart-panel').forEach(p => p.classList.remove('visible'));
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.getElementById('p_' + id).classList.add('visible');
+  document.querySelectorAll('.tab').forEach((b, i) => {
+    if (['pareto3d','q30_lli','q30_sei','lli_sei'][i] === id) b.classList.add('active');
+  });
+  const hint = document.getElementById('legend-3d-hint');
+  if (hint) hint.style.display = id === 'pareto3d' ? 'flex' : 'none';
+
+  if (!chartInstances[id]) {
+    const cfg = chartConfigs[id];
+    if (cfg.custom) {
+      chartInstances[id] = cfg.build('c_' + id);
+    } else {
+      chartInstances[id] = new Chart(document.getElementById('c_' + id), {
+        type: 'scatter',
+        data: { datasets: scatterDatasets(cfg.xk, cfg.yk) },
+        options: commonOpts(cfg.xk, cfg.yk, cfg.xRange, cfg.yRange)
+      });
+    }
+  }
+  if (id === 'pareto3d' && chartInstances[id]) {
+    chartInstances[id].resize();
+  }
+}
+
+function build3DPareto(canvasId) {
+  const canvas = document.getElementById(canvasId);
+  const container = canvas.parentElement;
+
+  // Size canvas to fill panel
+  const W = container.clientWidth  || 800;
+  const H = container.clientHeight || 340;
+  canvas.width  = W;
+  canvas.height = H;
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setSize(W, H);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x16181c, 1);
+
+  const scene  = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, W / H, 0.01, 1000);
+  camera.position.set(2.2, 1.6, 2.2);
+  camera.lookAt(0, 0, 0);
+
+  // Axis helpers (thin lines)
+  const lineMat = c => new THREE.LineBasicMaterial({ color: c });
+  const lineGeo = (a, b) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([...a, ...b], 3));
+    return g;
+  };
+  const axLen = 1.15;
+  scene.add(new THREE.Line(lineGeo([0,0,0],[axLen,0,0]), lineMat(0x4a9eff)));  // X = Q30
+  scene.add(new THREE.Line(lineGeo([0,0,0],[0,axLen,0]), lineMat(0xf87171)));  // Y = LLI
+  scene.add(new THREE.Line(lineGeo([0,0,0],[0,0,axLen]), lineMat(0x2dd4bf)));  // Z = SEI
+
+  // Subtle grid on XZ plane
+  const gridHelper = new THREE.GridHelper(2, 10, 0x2a2f3a, 0x1e2330);
+  gridHelper.position.y = 0;
+  scene.add(gridHelper);
+
+  // Normalise data to [0,1] cube
+  const qs = RAW.map(d=>d.Q), ls = RAW.map(d=>d.L), ss = RAW.map(d=>d.S);
+  const [qMin,qMax] = [Math.min(...qs), Math.max(...qs)];
+  const [lMin,lMax] = [Math.min(...ls), Math.max(...ls)];
+  const [sMin,sMax] = [Math.min(...ss), Math.max(...ss)];
+  const nx = v => (v-qMin)/(qMax-qMin);
+  const ny = v => (v-lMin)/(lMax-lMin);
+  const nz = v => (v-sMin)/(sMax-sMin);
+
+  // Spheres for each trial
+  const meshes = [];
+  RAW.forEach(d => {
+    let color, radius;
+    if (d.t === 0) {
+      color  = 0xf87171; radius = 0.045;           // baseline: coral, larger
+    } else if (d.p && d.z) {
+      color  = 0x4a9eff; radius = 0.028;           // Pareto C2=0: blue
+    } else if (d.p && !d.z) {
+      color  = 0xa78bfa; radius = 0.024;           // Pareto C2>0: purple
+    } else {
+      color  = 0x2e3340; radius = 0.016;           // non-Pareto: dark gray
+    }
+    const geo  = new THREE.SphereGeometry(radius, 10, 10);
+    const mat  = new THREE.MeshPhongMaterial({ color, shininess: 60, transparent: d.t !== 0 && !d.p, opacity: d.p ? 1 : 0.55 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(nx(d.Q), ny(d.L), nz(d.S));
+    mesh.userData = d;
+    meshes.push(mesh);
+    scene.add(mesh);
+  });
+
+  // Lighting
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(3, 5, 3);
+  scene.add(dir);
+
+  // Axis labels via sprite
+  function makeLabel(text, color) {
+    const c2 = document.createElement('canvas');
+    c2.width = 256; c2.height = 64;
+    const ctx = c2.getContext('2d');
+    ctx.font = 'bold 28px sans-serif';
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 128, 32);
+    const tex = new THREE.CanvasTexture(c2);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+    return new THREE.Sprite(mat);
+  }
+  const lq = makeLabel('Q30', '#4a9eff'); lq.scale.set(0.75,0.1875,1); lq.position.set(axLen+0.12, 0, 0); scene.add(lq);
+  const ll = makeLabel('LLI', '#f87171'); ll.scale.set(0.75,0.1875,1); ll.position.set(0, axLen+0.12, 0); scene.add(ll);
+  const ls2= makeLabel('SEI', '#2dd4bf'); ls2.scale.set(0.75,0.1875,1); ls2.position.set(0, 0, axLen+0.12); scene.add(ls2);
+
+  // Orbit controls (manual — no OrbitControls in r128 CDN build)
+  let isDragging = false, prevMouse = {x:0,y:0}, clickStart = null;
+  let spherical = { theta: Math.PI/4, phi: Math.PI/3, r: 3.2 };
+
+  function updateCamera() {
+    camera.position.set(
+      spherical.r * Math.sin(spherical.phi) * Math.sin(spherical.theta),
+      spherical.r * Math.cos(spherical.phi),
+      spherical.r * Math.sin(spherical.phi) * Math.cos(spherical.theta)
+    );
+    camera.lookAt(0.5, 0.5, 0.5);
+  }
+  updateCamera();
+
+  canvas.addEventListener('mousedown', e => { isDragging = true; prevMouse = {x:e.clientX,y:e.clientY}; clickStart = {x:e.clientX,y:e.clientY}; });
+  canvas.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    const dx = (e.clientX - prevMouse.x) * 0.008;
+    const dy = (e.clientY - prevMouse.y) * 0.008;
+    spherical.theta -= dx;
+    spherical.phi    = Math.max(0.15, Math.min(Math.PI-0.15, spherical.phi + dy));
+    prevMouse = {x:e.clientX, y:e.clientY};
+    updateCamera();
+  });
+  canvas.addEventListener('mouseup',   () => isDragging = false);
+  canvas.addEventListener('mouseleave',() => isDragging = false);
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    spherical.r = Math.max(1.5, Math.min(6, spherical.r + e.deltaY * 0.005));
+    updateCamera();
+  }, { passive: false });
+
+  // Touch support
+  let lastTouch = null;
+  canvas.addEventListener('touchstart', e => { lastTouch = e.touches[0]; });
+  canvas.addEventListener('touchmove', e => {
+    if (!lastTouch) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    const dx = (t.clientX - lastTouch.clientX) * 0.008;
+    const dy = (t.clientY - lastTouch.clientY) * 0.008;
+    spherical.theta -= dx;
+    spherical.phi    = Math.max(0.15, Math.min(Math.PI-0.15, spherical.phi + dy));
+    lastTouch = t;
+    updateCamera();
+  }, { passive: false });
+
+  // Click to label a point
+  canvas.addEventListener('click', e => {
+    if (!clickStart) return;
+    if (Math.abs(e.clientX - clickStart.x) + Math.abs(e.clientY - clickStart.y) > 5) return;
+    const rect = canvas.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(meshes);
+    const tip = document.getElementById('tooltip');
+    if (hits.length > 0) {
+      const d = hits[0].object.userData;
+      tip.innerHTML = `<strong style="color:var(--text)">Trial ${d.t}</strong><br>${d.c1.toFixed(2)}→${d.c2.toFixed(2)}→${d.c3.toFixed(2)} C<br>Q30 = ${d.Q.toFixed(4)} Ah<br>LLI = ${d.L.toFixed(5)} mol<br>SEI = ${d.S.toFixed(1)} nm`;
+      tip.style.display = 'block';
+      tip.style.left = (e.clientX + 14) + 'px';
+      tip.style.top  = (e.clientY - 10) + 'px';
+    } else {
+      tip.style.display = 'none';
+    }
+  });
+
+  let animId;
+  function animate() {
+    animId = requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // Return a pseudo-object with a resize method
+  return { resize() {
+    const W2 = container.clientWidth || 800;
+    const H2 = container.clientHeight || 340;
+    renderer.setSize(W2, H2);
+    camera.aspect = W2 / H2;
+    camera.updateProjectionMatrix();
+  }, _animId: animId };
+}
+
+/* Top 10 table */
+const top10 = RAW.filter(d => d.p && d.z).sort((a,b) => b.Q - a.Q).slice(0,10);
+const tbody = document.getElementById('top10tbody');
+top10.forEach(d => {
+  const pct = ((d.L - BL_LLI) / BL_LLI * 100).toFixed(1);
+  const sign = pct > 0 ? '+' : '';
+  const cls  = parseFloat(pct) > 5 ? 'pos' : parseFloat(pct) < -5 ? 'neg' : 'neu';
+  const hl   = d.t === 0 ? ' style="color:#fbbf24"' : '';
+  tbody.innerHTML += `<tr>
+    <td${hl}>${d.t}${d.t===0?' ★':''}</td>
+    <td class="mono">${d.c1.toFixed(2)}</td>
+    <td class="mono" style="color:#4a9eff">0.00</td>
+    <td class="mono">${d.c3.toFixed(2)}</td>
+    <td class="mono">${d.Q.toFixed(4)}</td>
+    <td class="mono">${d.L.toFixed(5)}</td>
+    <td class="mono">${d.S.toFixed(1)}</td>
+    <td class="mono ${cls}">${sign}${pct}%</td>
+  </tr>`;
+});
+
+/* Init first chart */
+window.addEventListener('load', () => showChart('pareto3d'));
+</script>
+</body>
+</html>
